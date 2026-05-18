@@ -54,7 +54,14 @@ class GrootRoboCasaEnv(RoboCasaEnv):
                 ] = spaces.Box(
                     low=0, high=1e10, shape=(512, 512, 1), dtype=np.float32
                 )
-            
+                if mapped_name != "video.res256_image_wrist_0":
+                    self.observation_space[
+                        mapped_name.replace("256_image", "512_arm_mask")
+                    ] = spaces.Box(low=0, high=1, shape=(512, 512), dtype=np.uint8)
+
+        self._robot_geom_ids = self._compute_robot_geom_ids()
+        self._arm_mask_kernel = np.ones((5, 5), np.uint8)
+
         self.observation_space[
             "annotation.human.action.task_description"
         ] = spaces.Text(max_length=256, charset=ALLOWED_LANGUAGE_CHARSET)
@@ -73,6 +80,17 @@ class GrootRoboCasaEnv(RoboCasaEnv):
             self.verbose and print("{OBS}", k, v)
         for k, v in self.action_space.items():
             self.verbose and print("{ACTION}", k, v)
+
+    def _compute_robot_geom_ids(self):
+        """Return geom IDs for robot arm + gripper (robot0_* and gripper0_* bodies)."""
+        model = self.env.sim.model
+        robot_geom_ids = []
+        for geom_id in range(model.ngeom):
+            body_id = int(model.geom_bodyid[geom_id])
+            body_name = model.body_id2name(body_id)
+            if body_name and (body_name.startswith("robot0_") or body_name.startswith("gripper0_")):
+                robot_geom_ids.append(geom_id)
+        return robot_geom_ids
 
     @staticmethod
     def process_img(img):
@@ -139,6 +157,12 @@ class GrootRoboCasaEnv(RoboCasaEnv):
                                         self.env.sim.model.vis.map.zfar * self.env.sim.model.stat.extent,
                                         )
                     )[::-1]
+                seg_key = camera_name + "_segmentation_element"
+                if mapped_name != "video.res256_image_wrist_0" and self._robot_geom_ids and seg_key in raw_obs:
+                    geom_ids = raw_obs[seg_key][::-1, :, 0].astype(np.int32)  # (H, W)
+                    arm_pixel = np.isin(geom_ids, self._robot_geom_ids).astype(np.uint8)
+                    arm_dilated = cv2.dilate(arm_pixel, self._arm_mask_kernel)
+                    obs[mapped_name.replace("256_image", "512_arm_mask")] = (arm_dilated == 0).astype(np.uint8)
         obs["annotation.human.action.task_description"] = raw_obs["language"]
         
         if "ep_meta" in raw_obs:

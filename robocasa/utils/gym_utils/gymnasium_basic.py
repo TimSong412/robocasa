@@ -66,6 +66,7 @@ def create_env_robosuite(
         use_camera_obs=enable_render,
         # camera_depths=False,
         camera_depths=True,
+        camera_segmentations="element",
         seed=seed,
         translucent_robot=False,
     )
